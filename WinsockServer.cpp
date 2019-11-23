@@ -7,6 +7,10 @@
 #include <ws2tcpip.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <iostream>
+
+#include<ios>
+#include<limits>
 
 // Need to link with Ws2_32.lib
 #pragma comment (lib, "Ws2_32.lib")
@@ -17,6 +21,8 @@
 
 int __cdecl main(void) 
 {
+	bool DEBUG = false;
+
     WSADATA wsaData;
     int iResult;
 
@@ -26,8 +32,9 @@ int __cdecl main(void)
     struct addrinfo *result = NULL;
     struct addrinfo hints;
 
-    int iSendResult;
+    int iSendResult = 0;
     char recvbuf[DEFAULT_BUFLEN];
+	char* sendbuf = new char[DEFAULT_BUFLEN];
     int recvbuflen = DEFAULT_BUFLEN;
     
     // Initialize Winsock
@@ -71,9 +78,8 @@ int __cdecl main(void)
     }
 
     freeaddrinfo(result);
-
     iResult = listen(ListenSocket, SOMAXCONN);
-    if (iResult == SOCKET_ERROR) {
+	if (iResult == SOCKET_ERROR) {
         printf("listen failed with error: %d\n", WSAGetLastError());
         closesocket(ListenSocket);
         WSACleanup();
@@ -81,7 +87,10 @@ int __cdecl main(void)
     }
 
     // Accept a client socket
+	printf("Waiting for client to establish a connection \n");
     ClientSocket = accept(ListenSocket, NULL, NULL);
+
+	printf("Connection esablished, waiting on message \n");
     if (ClientSocket == INVALID_SOCKET) {
         printf("accept failed with error: %d\n", WSAGetLastError());
         closesocket(ListenSocket);
@@ -96,29 +105,41 @@ int __cdecl main(void)
     do {
 
         iResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
-        if (iResult > 0) {
-            printf("Bytes received: %d\n", iResult);
+        if (iResult > 1) {
+            if(DEBUG) printf("Bytes received: %d\n", iResult);
+			
+			//Print the necessary characters using the recieved bytes size
+			printf(">>%.*s", iResult, recvbuf);
 
-        // Echo the buffer back to the sender
-            iSendResult = send( ClientSocket, recvbuf, iResult, 0 );
+			// Get user input to char* sendbuf
+			if (DEBUG)printf("Input a message: \n");
+			fgets(sendbuf, DEFAULT_BUFLEN, stdin);
+			//std::cout << "\n Enter message: \n";
+			//std::cin.getline(sendbuf, DEFAULT_BUFLEN);
+			//std::cin.ignore(1000, '\n');
+
+			// Send a message to the sender
+            iSendResult = send( ClientSocket, sendbuf, (int)strlen(sendbuf), 0 );
             if (iSendResult == SOCKET_ERROR) {
+				std::cout << "error 1: ";
                 printf("send failed with error: %d\n", WSAGetLastError());
                 closesocket(ClientSocket);
                 WSACleanup();
                 return 1;
             }
-            printf("Bytes sent: %d\n", iSendResult);
+            if(DEBUG) printf("Bytes sent: %d\n", iSendResult);
         }
-        else if (iResult == 0)
+        else if (iSendResult == 1)
             printf("Connection closing...\n");
         else  {
+			std::cout << "error 2: ";
             printf("recv failed with error: %d\n", WSAGetLastError());
             closesocket(ClientSocket);
             WSACleanup();
             return 1;
         }
 
-    } while (iResult > 0);
+    } while (iResult > 1);
 
     // shutdown the connection since we're done
     iResult = shutdown(ClientSocket, SD_SEND);
