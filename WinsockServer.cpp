@@ -8,9 +8,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <iostream>
+#include<string>
 
 #include<ios>
 #include<limits>
+
+#include "RSA.h"
 
 // Need to link with Ws2_32.lib
 #pragma comment (lib, "Ws2_32.lib")
@@ -19,9 +22,39 @@
 #define DEFAULT_BUFLEN 512
 #define DEFAULT_PORT "27015"
 
-int __cdecl main(void) 
+int __cdecl main(int argc, char** argv) 
 {
 	bool DEBUG = false;
+
+	//Booleans to do RSA checks
+	bool RSA_ON = false;
+	bool RSA_REC = false;
+	bool RSA_SEN = false;
+
+	//RSA variables, p and q are local while e and n are recieved
+	unsigned long long int p = 5, q = 7, e = 0, n = 0;
+
+	if (argc >= 2 && std::string(argv[1]) == "RSA") {
+		RSA_ON = true;
+		std::cout << "RSA Enabled" << std::endl;
+		std::cout << "Enter 2 different prime numbers whose product is over 255:" << std::endl;
+		std::cout << "p:" << std::endl;
+		std::cin >> p;
+		std::cout << "q:" << std::endl;
+		std::cin >> q;
+	}
+
+	//Only really needed here for scope later on
+	RSA rsa = RSA(p, q);
+
+	if (RSA_ON) {
+		if (p * q < 255 || !rsa.checkPrime(p) || !rsa.checkPrime(q)) {
+			std::cout << "Numbers don't work" << std::endl;
+			return 1;
+		}
+		std::cin.clear();
+		std::cin.ignore();
+	}
 
     WSADATA wsaData;
     int iResult;
@@ -106,17 +139,75 @@ int __cdecl main(void)
 
         iResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
         if (iResult > 1) {
-            if(DEBUG) printf("Bytes received: %d\n", iResult);
+
+			//RECIEVE MODE
+			//spacing to look nice
+			std::cout << std::endl;
+			if(DEBUG) printf("Bytes received: %d\n", iResult);
+			printf("%.*s", iResult, recvbuf);
+			if (RSA_ON) std::cout << std::endl;
 			
 			//Print the necessary characters using the recieved bytes size
-			printf(">>%.*s", iResult, recvbuf);
 
-			// Get user input to char* sendbuf
-			if (DEBUG)printf("Input a message: \n");
-			fgets(sendbuf, DEFAULT_BUFLEN, stdin);
-			//std::cout << "\n Enter message: \n";
-			//std::cin.getline(sendbuf, DEFAULT_BUFLEN);
-			//std::cin.ignore(1000, '\n');
+			//update with recieved public RSA vars
+			if (RSA_ON && !RSA_REC) {
+				std::string str(recvbuf);
+				int space = str.find(' ');
+				e = stoull(str.substr(2, space - 2));
+
+				n = stoull(str.substr(space + 3));
+				std::cout << "RSA: Recieved public keys e: " << e << ", n: " << n << std::endl;
+				RSA_REC = true;
+			}
+			//use public vars to decrypt message
+			else if (RSA_ON && RSA_REC) {
+				std::string str(recvbuf);
+				str = str.substr(0, iResult);
+				std::string message = "";
+				//if (DEBUG) std::cout << "Raw: " << str << std::endl;
+				int index = 0;
+				int nextColon = str.find(':');
+				int finalColon = str.rfind(':');
+				if (nextColon != finalColon) {
+					do {
+						message += char(rsa.decrypt(stoull(str.substr(index, nextColon - index)), rsa.get_d(), rsa.get_n()));
+						//if (DEBUG) std::cout << str.substr(index, nextColon - index) << std::endl;
+						index = nextColon + 1;
+						nextColon = str.find(':', nextColon + 1);
+						//if (DEBUG) std::cout << "next: " << nextColon << " final: " << finalColon << " index: " << index << std::endl;
+					} while (nextColon < finalColon);
+				}
+				//if(DEBUG) std::cout << str.substr(index, finalColon - index) << std::endl;
+				message += char(rsa.decrypt(stoull(str.substr(index, finalColon - index)), rsa.get_d(), rsa.get_n()));
+				std::cout << message << std::endl;
+			}
+
+			//SEND MODE
+
+			//gather user input and fill the sendbuffer with it
+			printf("Input a message: \n>> ");
+
+			//send keys
+			if (RSA_ON && !RSA_SEN) {
+				std::string pub_key = "e:" + std::to_string(rsa.get_e()) + " n:" + std::to_string(rsa.get_n()) + '\n';
+				char* c = _strdup(pub_key.c_str());
+				sendbuf = c;
+				RSA_SEN = true;
+			}
+			//send message if RSA is on and keys were sent
+			else if (RSA_ON && RSA_SEN) {
+				std::string input;
+				std::getline(std::cin, input);
+				std::string final = "";
+				for (char c : input) {
+					final += std::to_string(rsa.encrypt((int)c, e, n)) + ":"; //encrypt with recieved public vars
+				}
+				sendbuf = _strdup(final.c_str());
+			}
+			//send message if RSA is off
+			else {
+				fgets(sendbuf, DEFAULT_BUFLEN, stdin);
+			}
 
 			// Send a message to the sender
             iSendResult = send( ClientSocket, sendbuf, (int)strlen(sendbuf), 0 );
